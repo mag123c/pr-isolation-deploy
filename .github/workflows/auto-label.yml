@@ -1,0 +1,22 @@
+name: Auto Label Preview
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - main  # 실제 적용 시 develop으로 변경
+
+jobs:
+  add-preview-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add preview label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['preview']
+            })
