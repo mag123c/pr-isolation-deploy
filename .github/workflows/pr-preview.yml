@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: preview-web
-  ECS_CLUSTER: preview-cluster
+  ECS_CLUSTER: preview-cluster2
   DOMAIN: ounwan.net
 
 jobs:
