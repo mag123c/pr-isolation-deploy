@@ -2,7 +2,9 @@ name: PR Preview
 
 on:
   pull_request:
-    types: [labeled, closed]
+    types: [opened, synchronize, closed]
+    branches:
+      - main  # 실제 적용 시 develop으로 변경
 
 env:
   AWS_REGION: ap-northeast-2
@@ -12,7 +14,7 @@ env:
 
 jobs:
   deploy-preview:
-    if: github.event.action == 'labeled' && github.event.label.name == 'preview'
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
