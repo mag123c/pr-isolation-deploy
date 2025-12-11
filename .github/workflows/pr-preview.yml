@@ -1,0 +1,195 @@
+name: PR Preview
+
+on:
+  pull_request:
+    types: [labeled, closed]
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: preview-web
+  ECS_CLUSTER: preview-cluster
+  DOMAIN: ounwan.net
+
+jobs:
+  deploy-preview:
+    if: github.event.action == 'labeled' && github.event.label.name == 'preview'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: pr-${{ github.event.number }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            --build-arg PR_NUMBER=${{ github.event.number }} \
+            --build-arg DEPLOY_URL=pr-${{ github.event.number }}.${{ env.DOMAIN }} \
+            --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Create Target Group
+        id: create-tg
+        run: |
+          TG_ARN=$(aws elbv2 create-target-group \
+            --name pr-${{ github.event.number }}-tg \
+            --protocol HTTP \
+            --port 3000 \
+            --vpc-id ${{ secrets.VPC_ID }} \
+            --target-type ip \
+            --health-check-path / \
+            --health-check-interval-seconds 30 \
+            --healthy-threshold-count 2 \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text)
+          echo "tg_arn=$TG_ARN" >> $GITHUB_OUTPUT
+
+      - name: Add ALB listener rule
+        run: |
+          aws elbv2 create-rule \
+            --listener-arn ${{ secrets.LISTENER_ARN }} \
+            --priority ${{ github.event.number }} \
+            --conditions "Field=host-header,Values=pr-${{ github.event.number }}.${{ env.DOMAIN }}" \
+            --actions "Type=forward,TargetGroupArn=${{ steps.create-tg.outputs.tg_arn }}"
+
+      - name: Create ECS service
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          # Task Definition 등록
+          cat > task-def.json << 'TASKDEF'
+          {
+            "family": "pr-${{ github.event.number }}-web",
+            "containerDefinitions": [{
+              "name": "web",
+              "image": "${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:pr-${{ github.event.number }}",
+              "portMappings": [{"containerPort": 3000}],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/preview",
+                  "awslogs-region": "${{ env.AWS_REGION }}",
+                  "awslogs-stream-prefix": "pr-${{ github.event.number }}"
+                }
+              }
+            }],
+            "requiresCompatibilities": ["FARGATE"],
+            "networkMode": "awsvpc",
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
+          }
+          TASKDEF
+
+          # 변수 치환
+          sed -i "s|\${{ steps.ecr-login.outputs.registry }}|$ECR_REGISTRY|g" task-def.json
+
+          TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          # ECS 서비스 생성
+          aws ecs create-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service-name pr-${{ github.event.number }} \
+            --task-definition $TASK_ARN \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}" \
+            --load-balancers "targetGroupArn=${{ steps.create-tg.outputs.tg_arn }},containerName=web,containerPort=3000"
+
+      - name: Comment PR with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.number }},
+              body: '🚀 **Preview 환경 준비 완료!**\n\n🔗 https://pr-${{ github.event.number }}.${{ env.DOMAIN }}\n\n> PR이 닫히면 자동으로 정리됩니다.'
+            })
+
+  cleanup-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check if preview exists
+        id: check
+        run: |
+          SERVICE=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services pr-${{ github.event.number }} \
+            --query 'services[0].serviceName' \
+            --output text 2>/dev/null || echo "None")
+          echo "exists=$([[ "$SERVICE" != "None" && -n "$SERVICE" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Delete ECS service
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service pr-${{ github.event.number }} \
+            --desired-count 0
+
+          sleep 10
+
+          aws ecs delete-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service pr-${{ github.event.number }} \
+            --force
+
+      - name: Delete ALB rule
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          RULE_ARN=$(aws elbv2 describe-rules \
+            --listener-arn ${{ secrets.LISTENER_ARN }} \
+            --query "Rules[?Priority=='${{ github.event.number }}'].RuleArn" \
+            --output text)
+
+          if [ -n "$RULE_ARN" ] && [ "$RULE_ARN" != "None" ]; then
+            aws elbv2 delete-rule --rule-arn $RULE_ARN
+          fi
+
+      - name: Delete Target Group
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names pr-${{ github.event.number }}-tg \
+            --query 'TargetGroups[0].TargetGroupArn' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            aws elbv2 delete-target-group --target-group-arn $TG_ARN
+          fi
+
+      - name: Deregister task definition
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          TASK_DEFS=$(aws ecs list-task-definitions \
+            --family-prefix pr-${{ github.event.number }}-web \
+            --query 'taskDefinitionArns' \
+            --output text)
+
+          for TASK_DEF in $TASK_DEFS; do
+            aws ecs deregister-task-definition --task-definition $TASK_DEF || true
+          done
