@@ -67,21 +67,26 @@ jobs:
       - name: Create ECS service
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          PR_NUMBER: ${{ github.event.number }}
+          TG_ARN: ${{ steps.create-tg.outputs.tg_arn }}
+          EXECUTION_ROLE_ARN: ${{ secrets.ECS_EXECUTION_ROLE_ARN }}
+          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
+          SECURITY_GROUP_ID: ${{ secrets.SECURITY_GROUP_ID }}
         run: |
           # Task Definition 등록
-          cat > task-def.json << 'TASKDEF'
+          cat > task-def.json << EOF
           {
-            "family": "pr-${{ github.event.number }}-web",
+            "family": "pr-${PR_NUMBER}-web",
             "containerDefinitions": [{
               "name": "web",
-              "image": "${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:pr-${{ github.event.number }}",
+              "image": "${ECR_REGISTRY}/${ECR_REPOSITORY}:pr-${PR_NUMBER}",
               "portMappings": [{"containerPort": 3000}],
               "logConfiguration": {
                 "logDriver": "awslogs",
                 "options": {
                   "awslogs-group": "/ecs/preview",
-                  "awslogs-region": "${{ env.AWS_REGION }}",
-                  "awslogs-stream-prefix": "pr-${{ github.event.number }}"
+                  "awslogs-region": "${AWS_REGION}",
+                  "awslogs-stream-prefix": "pr-${PR_NUMBER}"
                 }
               }
             }],
@@ -89,12 +94,9 @@ jobs:
             "networkMode": "awsvpc",
             "cpu": "256",
             "memory": "512",
-            "executionRoleArn": "${{ secrets.ECS_EXECUTION_ROLE_ARN }}"
+            "executionRoleArn": "${EXECUTION_ROLE_ARN}"
           }
-          TASKDEF
-
-          # 변수 치환
-          sed -i "s|\${{ steps.ecr-login.outputs.registry }}|$ECR_REGISTRY|g" task-def.json
+          EOF
 
           TASK_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://task-def.json \
@@ -103,13 +105,13 @@ jobs:
 
           # ECS 서비스 생성
           aws ecs create-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service-name pr-${{ github.event.number }} \
+            --cluster ${ECS_CLUSTER} \
+            --service-name pr-${PR_NUMBER} \
             --task-definition $TASK_ARN \
             --desired-count 1 \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=${{ steps.create-tg.outputs.tg_arn }},containerName=web,containerPort=3000"
+            --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+            --load-balancers "targetGroupArn=${TG_ARN},containerName=web,containerPort=3000"
 
       - name: Comment PR with preview URL
         uses: actions/github-script@v7
