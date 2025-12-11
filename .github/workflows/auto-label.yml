@@ -6,6 +6,9 @@ on:
     branches:
       - main  # 실제 적용 시 develop으로 변경
 
+permissions:
+  pull-requests: write
+
 jobs:
   add-preview-label:
     runs-on: ubuntu-latest
