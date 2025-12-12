@@ -6,6 +6,10 @@ on:
     branches:
       - main  # 실제 적용 시 develop으로 변경
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: preview-web
@@ -42,31 +46,53 @@ jobs:
             .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-      - name: Create Target Group
+      - name: Get or Create Target Group
         id: create-tg
         run: |
-          TG_ARN=$(aws elbv2 create-target-group \
-            --name pr-${{ github.event.number }}-tg \
-            --protocol HTTP \
-            --port 3000 \
-            --vpc-id ${{ secrets.VPC_ID }} \
-            --target-type ip \
-            --health-check-path / \
-            --health-check-interval-seconds 30 \
-            --healthy-threshold-count 2 \
+          # 기존 Target Group 확인
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names pr-${{ github.event.number }}-tg \
             --query 'TargetGroups[0].TargetGroupArn' \
-            --output text)
+            --output text 2>/dev/null || echo "")
+
+          if [ -z "$TG_ARN" ] || [ "$TG_ARN" == "None" ]; then
+            echo "Creating new Target Group..."
+            TG_ARN=$(aws elbv2 create-target-group \
+              --name pr-${{ github.event.number }}-tg \
+              --protocol HTTP \
+              --port 3000 \
+              --vpc-id ${{ secrets.VPC_ID }} \
+              --target-type ip \
+              --health-check-path / \
+              --health-check-interval-seconds 30 \
+              --healthy-threshold-count 2 \
+              --query 'TargetGroups[0].TargetGroupArn' \
+              --output text)
+          else
+            echo "Target Group already exists: $TG_ARN"
+          fi
           echo "tg_arn=$TG_ARN" >> $GITHUB_OUTPUT
 
       - name: Add ALB listener rule
         run: |
-          aws elbv2 create-rule \
+          # 기존 규칙 확인
+          RULE_ARN=$(aws elbv2 describe-rules \
             --listener-arn ${{ secrets.LISTENER_ARN }} \
-            --priority ${{ github.event.number }} \
-            --conditions "Field=host-header,Values=pr-${{ github.event.number }}.${{ env.DOMAIN }}" \
-            --actions "Type=forward,TargetGroupArn=${{ steps.create-tg.outputs.tg_arn }}"
+            --query "Rules[?Priority=='${{ github.event.number }}'].RuleArn" \
+            --output text 2>/dev/null || echo "")
 
-      - name: Create ECS service
+          if [ -z "$RULE_ARN" ] || [ "$RULE_ARN" == "None" ]; then
+            echo "Creating new ALB rule..."
+            aws elbv2 create-rule \
+              --listener-arn ${{ secrets.LISTENER_ARN }} \
+              --priority ${{ github.event.number }} \
+              --conditions "Field=host-header,Values=pr-${{ github.event.number }}.${{ env.DOMAIN }}" \
+              --actions "Type=forward,TargetGroupArn=${{ steps.create-tg.outputs.tg_arn }}"
+          else
+            echo "ALB rule already exists: $RULE_ARN"
+          fi
+
+      - name: Create or Update ECS service
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           PR_NUMBER: ${{ github.event.number }}
@@ -105,15 +131,31 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
 
-          # ECS 서비스 생성
-          aws ecs create-service \
+          # 기존 서비스 확인
+          SERVICE_STATUS=$(aws ecs describe-services \
             --cluster ${ECS_CLUSTER} \
-            --service-name pr-${PR_NUMBER} \
-            --task-definition $TASK_ARN \
-            --desired-count 1 \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=${TG_ARN},containerName=web,containerPort=3000"
+            --services pr-${PR_NUMBER} \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo "MISSING")
+
+          if [ "$SERVICE_STATUS" == "ACTIVE" ]; then
+            echo "Updating existing service..."
+            aws ecs update-service \
+              --cluster ${ECS_CLUSTER} \
+              --service pr-${PR_NUMBER} \
+              --task-definition $TASK_ARN \
+              --force-new-deployment
+          else
+            echo "Creating new service..."
+            aws ecs create-service \
+              --cluster ${ECS_CLUSTER} \
+              --service-name pr-${PR_NUMBER} \
+              --task-definition $TASK_ARN \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+              --load-balancers "targetGroupArn=${TG_ARN},containerName=web,containerPort=3000"
+          fi
 
       - name: Comment PR with preview URL
         uses: actions/github-script@v7
