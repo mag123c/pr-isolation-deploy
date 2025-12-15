@@ -1,4 +1,5 @@
-name: PR Preview Cleanup
+name: PR Preview - Cleanup
+run-name: "🧹 pr-${{ github.event.number }}.${{ vars.DOMAIN || 'ounwan.net' }} 테스트 환경 정리"
 
 on:
   pull_request:
@@ -6,22 +7,28 @@ on:
     branches:
       - main
 
+concurrency:
+  group: pr-preview-${{ github.event.number }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-northeast-2
   ECS_CLUSTER: preview-cluster2
+  DOMAIN: ounwan.net
 
 jobs:
   cleanup:
+    name: 🗑️ 환경 정리
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials
+      - name: 🔐 AWS 인증
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check if preview exists
+      - name: 🔍 Preview 환경 존재 확인
         id: check
         run: |
           SERVICE=$(aws ecs describe-services \
@@ -31,22 +38,25 @@ jobs:
             --output text 2>/dev/null || echo "None")
           echo "exists=$([[ "$SERVICE" != "None" && -n "$SERVICE" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
-      - name: Delete ECS service
+      - name: 🛑 ECS 서비스 삭제
         if: steps.check.outputs.exists == 'true'
         run: |
+          echo "Stopping service..."
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service pr-${{ github.event.number }} \
             --desired-count 0
 
+          echo "Waiting for tasks to stop..."
           sleep 10
 
+          echo "Deleting service..."
           aws ecs delete-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service pr-${{ github.event.number }} \
             --force
 
-      - name: Delete ALB rule
+      - name: 🔀 ALB 라우팅 규칙 삭제
         if: steps.check.outputs.exists == 'true'
         run: |
           RULE_ARN=$(aws elbv2 describe-rules \
@@ -55,10 +65,11 @@ jobs:
             --output text)
 
           if [ -n "$RULE_ARN" ] && [ "$RULE_ARN" != "None" ]; then
+            echo "Deleting ALB rule..."
             aws elbv2 delete-rule --rule-arn $RULE_ARN
           fi
 
-      - name: Delete Target Group
+      - name: 🎯 Target Group 삭제
         if: steps.check.outputs.exists == 'true'
         run: |
           TG_ARN=$(aws elbv2 describe-target-groups \
@@ -67,10 +78,11 @@ jobs:
             --output text 2>/dev/null || echo "")
 
           if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            echo "Deleting Target Group..."
             aws elbv2 delete-target-group --target-group-arn $TG_ARN
           fi
 
-      - name: Deregister task definition
+      - name: 📋 Task Definition 정리
         if: steps.check.outputs.exists == 'true'
         run: |
           TASK_DEFS=$(aws ecs list-task-definitions \
@@ -79,5 +91,10 @@ jobs:
             --output text)
 
           for TASK_DEF in $TASK_DEFS; do
+            echo "Deregistering: $TASK_DEF"
             aws ecs deregister-task-definition --task-definition $TASK_DEF || true
           done
+
+      - name: ✅ 정리 완료
+        run: |
+          echo "🧹 pr-${{ github.event.number }}.${{ env.DOMAIN }} 환경이 정리되었습니다."
