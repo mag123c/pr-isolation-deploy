@@ -13,8 +13,8 @@ export default function Home() {
           <p className="text-gray-400 text-lg">
             PR별 격리 환경 테스트용 앱
           </p>
-          <div className="mt-4 px-4 py-2 bg-blue-600 rounded-lg inline-block">
-            Feature A: 파란색 버튼!
+          <div className="mt-4 px-4 py-2 bg-green-600 rounded-lg inline-block">
+            Test Branch 3: 초록색 테마
           </div>
         </div>
 
@@ -39,20 +39,6 @@ export default function Home() {
               {buildTime}
             </span>
           </div>
-        </div>
-
-        <div className="bg-blue-900/30 rounded-xl p-6 border border-blue-800">
-          <h2 className="text-xl font-semibold mb-3">테스트 방법</h2>
-          <ol className="list-decimal list-inside space-y-2 text-gray-300">
-            <li>PR 생성 후 <code className="bg-gray-700 px-2 py-1 rounded">preview</code> 라벨 추가</li>
-            <li>GitHub Actions가 자동으로 환경 생성</li>
-            <li>PR 코멘트에 달린 URL로 접속</li>
-            <li>위 PR Number가 해당 PR 번호와 일치하는지 확인</li>
-          </ol>
-        </div>
-
-        <div className="text-center text-gray-500 text-sm">
-          <p>이 환경은 PR이 닫히면 자동으로 삭제됩니다.</p>
         </div>
       </div>
     </main>
