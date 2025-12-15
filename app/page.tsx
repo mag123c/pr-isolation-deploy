@@ -13,8 +13,8 @@ export default function Home() {
           <p className="text-gray-400 text-lg">
             PR별 격리 환경 테스트용 앱
           </p>
-          <div className="mt-4 px-4 py-2 bg-green-600 rounded-lg inline-block">
-            Feature B: 초록색 배지!
+          <div className="mt-4 px-4 py-2 bg-purple-600 rounded-lg inline-block">
+            Feature C: 보라색 배지!
           </div>
         </div>
 
