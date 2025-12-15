@@ -1,10 +1,10 @@
-name: PR Preview
+name: PR Preview Deploy
 
 on:
   pull_request:
-    types: [opened, synchronize, closed]
+    types: [opened, synchronize]
     branches:
-      - main  # 실제 적용 시 develop으로 변경
+      - main
 
 permissions:
   contents: read
@@ -17,8 +17,7 @@ env:
   DOMAIN: ounwan.net
 
 jobs:
-  deploy-preview:
-    if: github.event.action != 'closed'
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +48,6 @@ jobs:
       - name: Get or Create Target Group
         id: create-tg
         run: |
-          # 기존 Target Group 확인
           TG_ARN=$(aws elbv2 describe-target-groups \
             --names pr-${{ github.event.number }}-tg \
             --query 'TargetGroups[0].TargetGroupArn' \
@@ -75,7 +73,6 @@ jobs:
 
       - name: Add ALB listener rule
         run: |
-          # 기존 규칙 확인
           RULE_ARN=$(aws elbv2 describe-rules \
             --listener-arn ${{ secrets.LISTENER_ARN }} \
             --query "Rules[?Priority=='${{ github.event.number }}'].RuleArn" \
@@ -101,7 +98,6 @@ jobs:
           SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
           SECURITY_GROUP_ID: ${{ secrets.SECURITY_GROUP_ID }}
         run: |
-          # Task Definition 등록
           cat > task-def.json << EOF
           {
             "family": "pr-${PR_NUMBER}-web",
@@ -131,7 +127,6 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
 
-          # 기존 서비스 확인
           SERVICE_STATUS=$(aws ecs describe-services \
             --cluster ${ECS_CLUSTER} \
             --services pr-${PR_NUMBER} \
@@ -167,75 +162,3 @@ jobs:
               issue_number: ${{ github.event.number }},
               body: '🚀 **Preview 환경 준비 완료!**\n\n🔗 https://pr-${{ github.event.number }}.${{ env.DOMAIN }}\n\n> PR이 닫히면 자동으로 정리됩니다.'
             })
-
-  cleanup-preview:
-    if: github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Check if preview exists
-        id: check
-        run: |
-          SERVICE=$(aws ecs describe-services \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --services pr-${{ github.event.number }} \
-            --query 'services[0].serviceName' \
-            --output text 2>/dev/null || echo "None")
-          echo "exists=$([[ "$SERVICE" != "None" && -n "$SERVICE" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
-
-      - name: Delete ECS service
-        if: steps.check.outputs.exists == 'true'
-        run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service pr-${{ github.event.number }} \
-            --desired-count 0
-
-          sleep 10
-
-          aws ecs delete-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service pr-${{ github.event.number }} \
-            --force
-
-      - name: Delete ALB rule
-        if: steps.check.outputs.exists == 'true'
-        run: |
-          RULE_ARN=$(aws elbv2 describe-rules \
-            --listener-arn ${{ secrets.LISTENER_ARN }} \
-            --query "Rules[?Priority=='${{ github.event.number }}'].RuleArn" \
-            --output text)
-
-          if [ -n "$RULE_ARN" ] && [ "$RULE_ARN" != "None" ]; then
-            aws elbv2 delete-rule --rule-arn $RULE_ARN
-          fi
-
-      - name: Delete Target Group
-        if: steps.check.outputs.exists == 'true'
-        run: |
-          TG_ARN=$(aws elbv2 describe-target-groups \
-            --names pr-${{ github.event.number }}-tg \
-            --query 'TargetGroups[0].TargetGroupArn' \
-            --output text 2>/dev/null || echo "")
-
-          if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
-            aws elbv2 delete-target-group --target-group-arn $TG_ARN
-          fi
-
-      - name: Deregister task definition
-        if: steps.check.outputs.exists == 'true'
-        run: |
-          TASK_DEFS=$(aws ecs list-task-definitions \
-            --family-prefix pr-${{ github.event.number }}-web \
-            --query 'taskDefinitionArns' \
-            --output text)
-
-          for TASK_DEF in $TASK_DEFS; do
-            aws ecs deregister-task-definition --task-definition $TASK_DEF || true
-          done
