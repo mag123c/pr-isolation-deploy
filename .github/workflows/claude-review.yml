@@ -32,6 +32,16 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: "이 PR의 변경사항을 리뷰해주세요. 코드 품질, 잠재적 버그, 보안 이슈, 개선사항을 확인해주세요."
+          prompt: |
+            이 PR의 변경사항을 리뷰하고, 반드시 PR에 리뷰 코멘트를 작성해주세요.
+
+            리뷰 내용:
+            - 코드 품질 및 베스트 프랙티스
+            - 잠재적 버그 및 에러 처리
+            - 보안 이슈
+            - 개선 제안사항
+
+            리뷰 완료 후 PR 코멘트로 결과를 게시해주세요.
           use_sticky_comment: true
-          claude_args: "--max-turns 5"
+          show_full_output: true
+          claude_args: "--max-turns 10"
