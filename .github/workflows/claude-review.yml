@@ -32,4 +32,5 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: "이 PR의 변경사항을 리뷰해주세요. 코드 품질, 잠재적 버그, 보안 이슈, 개선사항을 확인해주세요."
           claude_args: "--max-turns 5"

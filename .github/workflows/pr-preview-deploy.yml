@@ -169,6 +169,7 @@ jobs:
           fi
 
       - name: 💬 PR에 URL 코멘트
+        if: github.event.action == 'opened'
         uses: actions/github-script@v7
         with:
           script: |
