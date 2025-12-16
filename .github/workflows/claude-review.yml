@@ -8,10 +8,15 @@ on:
   pull_request_review_comment:
     types: [created]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
-    # PR 코멘트에서 @claude 멘션하거나, PR 열릴 때 실행
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -27,4 +32,4 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          max_turns: "5"
+          claude_args: "--max-turns 5"
