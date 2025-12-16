@@ -33,21 +33,9 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            이 PR의 변경사항을 리뷰하고, PR에 코멘트를 작성해주세요.
-
-            ## 리뷰 포인트
-            - 코드 품질 및 베스트 프랙티스
-            - 잠재적 버그 및 에러 처리
-            - 보안 이슈
-            - 개선 제안사항
-
-            ## 출력 형식
-            - 각 이슈를 파일명:라인번호와 함께 명시
-            - 심각도 표시: 🔴 Critical, 🟡 Warning, 🟢 Info
-            - 수정 제안 코드 포함
-
-            리뷰 완료 후 `gh pr comment` 명령어로 PR에 코멘트를 게시하세요.
+            이 PR을 코드 리뷰하고 gh pr comment로 리뷰 결과를 PR에 게시해주세요.
+            리뷰 시 코드 품질, 버그, 보안, 개선사항을 확인하세요.
           settings: ".claude/settings.json"
           use_sticky_comment: true
           show_full_output: true
-          claude_args: "--max-turns 10"
+          claude_args: "--max-turns 15"
