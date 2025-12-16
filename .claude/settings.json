@@ -2,11 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(gh:*)",
+      "Bash(gh api:*)",
       "Bash(git:*)",
+      "Bash(cat:*)",
       "Read",
+      "Write",
       "Glob",
       "Grep",
       "mcp__github"
-    ]
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }
