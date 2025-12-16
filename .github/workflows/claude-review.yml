@@ -33,32 +33,20 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            이 PR의 변경사항을 리뷰하고, GitHub의 인라인 코드 리뷰 기능을 사용해서 리뷰를 제출해주세요.
-
-            ## 리뷰 방법
-            gh api를 사용해서 PR Review를 생성하세요:
-
-            ```bash
-            gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews \
-              -X POST \
-              -f body="전체 리뷰 요약" \
-              -f event="COMMENT" \
-              -f 'comments=[{"path":"파일경로","line":라인번호,"body":"코멘트 내용"}]'
-            ```
+            이 PR의 변경사항을 리뷰하고, PR에 코멘트를 작성해주세요.
 
             ## 리뷰 포인트
             - 코드 품질 및 베스트 프랙티스
             - 잠재적 버그 및 에러 처리
             - 보안 이슈
-            - 개선 제안사항 (suggestion 코드 블록 포함)
+            - 개선 제안사항
 
-            ## 중요
-            - 반드시 `gh pr diff`로 변경된 파일과 라인을 확인하세요
-            - 각 이슈를 해당 파일의 정확한 라인에 인라인 코멘트로 달아주세요
-            - suggestion 블록을 사용해서 수정 제안을 해주세요:
-              ```suggestion
-              수정된 코드
-              ```
+            ## 출력 형식
+            - 각 이슈를 파일명:라인번호와 함께 명시
+            - 심각도 표시: 🔴 Critical, 🟡 Warning, 🟢 Info
+            - 수정 제안 코드 포함
+
+            리뷰 완료 후 `gh pr comment` 명령어로 PR에 코멘트를 게시하세요.
           settings: ".claude/settings.json"
           use_sticky_comment: true
           show_full_output: true
