@@ -42,7 +42,7 @@ jobs:
             - 개선 제안사항
 
             리뷰 완료 후 PR 코멘트로 결과를 게시해주세요.
-          additional_permissions: "Bash(gh:*),Bash(git:*)"
+          additional_permissions: "Bash(gh pr:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(git:*)"
           use_sticky_comment: true
           show_full_output: true
           claude_args: "--max-turns 10"
